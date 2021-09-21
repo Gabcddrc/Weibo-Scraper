@@ -22,7 +22,7 @@ from requests.api import request
 from tqdm import tqdm
 
 
-userID = '1669879400'
+userIDs = ['1669879400']
 from_date = datetime.strptime('2021-8-1', '%Y-%m-%d')
 to_date = datetime.strptime(str(date.today()), '%Y-%m-%d')
 keyWords=''
@@ -64,7 +64,7 @@ def get_user_Json(param):
                         verify=False)
     return r.json()
 
-def retrieve_user_info():
+def retrieve_user_info(userID):
     userJson = get_user_Json({'containerid': '100505' + userID})
     userProfile = {}
     if userJson['ok']:
@@ -82,7 +82,7 @@ def retrieve_user_info():
 
 
 
-def retrieve_page(page_num):
+def retrieve_page(page_num, userID):
     try: 
         if keyWords:
             params = {
@@ -128,28 +128,29 @@ def scrape():
     try:
         if to_date >= from_date:
             print('valid time period')
-            userProfile = retrieve_user_info()
+            for userID in userIDs:
+                userProfile = retrieve_user_info(userID)
 
-            weibo_count = userProfile['weibo_count']
-            page_count = int(math.ceil(weibo_count / 10.0))
+                weibo_count = userProfile['weibo_count']
+                page_count = int(math.ceil(weibo_count / 10.0))
 
-            randomSleep = 0
-            random_pages = random.randint(1, 5)
-            
-            for page_num in tqdm(range(1, page_count+1)):
-                status = retrieve_page(page_num) # 1 end of the time period,  2 haven't reached the set time period
-                if status == 1:
-                    break
-                if status == 2:
-                    page_num += 5
-                    continue
-
+                randomSleep = 0
+                random_pages = random.randint(1, 5)
                 
-                #mimic human 
-                if (page_num - randomSleep) % random_pages == 0 and page_num < page_count:
-                        sleep(random.randint(6, 10))
-                        randomSleep = page_num
-                        random_pages = random.randint(1, 5)
+                for page_num in tqdm(range(1, page_count+1)):
+                    status = retrieve_page(page_num, userID) # 1 end of the time period,  2 haven't reached the set time period
+                    if status == 1:
+                        break
+                    if status == 2:
+                        page_num += 5
+                        continue
+
+                    
+                    #mimic human 
+                    if (page_num - randomSleep) % random_pages == 0:
+                            sleep(random.randint(6, 10))
+                            randomSleep = page_num
+                            random_pages = random.randint(1, 5)
         else:
             print('invalid time period')
 
@@ -159,4 +160,4 @@ def scrape():
 scrape()
 
 import pandas as pd
-pd.DataFrame(collection, index='idx').to_csv('weibos.csv')
+pd.DataFrame(collection).to_csv('weibos.csv')
