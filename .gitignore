@@ -1,0 +1,5 @@
+# .gitignore
+*.log
+
+Scraper/weibo/*
+*.csv

@@ -23,7 +23,7 @@ from tqdm import tqdm
 
 
 userIDs = ['1669879400']
-from_date = datetime.strptime('2021-8-1', '%Y-%m-%d')
+from_date = datetime.strptime('2021-9-1', '%Y-%m-%d')
 to_date = datetime.strptime(str(date.today()), '%Y-%m-%d')
 keyWords=''
 
@@ -115,6 +115,7 @@ def retrieve_page(page_num, userID):
                         return 2
                     collect = {'weibo_Id' : weiboInfo['id'], 'content' : selector.xpath('string(.)'), 'date' : standardize_date(weiboInfo['created_at']), 'type' : 'post' }
                     collection.append(collect)
+                    get_comments(weiboInfo['id'], 1)
             else:
                 print('skipping some weibo')
 
@@ -123,6 +124,35 @@ def retrieve_page(page_num, userID):
         print(e)
         return None
 
+
+def get_comments(weibo_Id, num_of_comments):
+
+    comments_url = "https://m.weibo.cn/api/comments/show?id={id}&page={page}".format(id=weibo_Id, page=1)
+    comments_req = requests.get(comments_url)
+    try: 
+        comments_json = comments_req.json()
+    except Exception as e:
+        print('fail to grab comment')
+        return None
+
+    comments_data = comments_json.get('data')
+    if not comments_data:
+        print('no comments')
+        return None
+    comments = comments_data.get('data')
+    
+    for comment in comments:
+        num_of_comments -= 1
+        
+        text = comment['text']
+        selector = etree.HTML(text)
+        collect = {'weibo_Id' : comment['id'], 'content' : selector.xpath('string(.)'), 'date' : standardize_date(comment['created_at']), 'type' : 'comment' }
+        collection.append(collect)
+
+        if num_of_comments <= 0:
+            return None
+
+    
 
 def scrape():
     try:

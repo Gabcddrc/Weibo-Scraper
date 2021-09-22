@@ -47,16 +47,6 @@ class Weibo(object):
         self.since_date = since_date  # 起始时间，即爬取发布日期从该值到现在的微博，形式为yyyy-mm-dd
         self.start_page = config.get('start_page',
                                      1)  # 开始爬的页，如果中途被限制而结束可以用此定义开始页码
-        self.write_mode = config[
-            'write_mode']  # 结果信息保存类型，为list形式，可包含csv、mongo和mysql三种类型
-        self.original_pic_download = config[
-            'original_pic_download']  # 取值范围为0、1, 0代表不下载原创微博图片,1代表下载
-        self.retweet_pic_download = config[
-            'retweet_pic_download']  # 取值范围为0、1, 0代表不下载转发微博图片,1代表下载
-        self.original_video_download = config[
-            'original_video_download']  # 取值范围为0、1, 0代表不下载原创微博视频,1代表下载
-        self.retweet_video_download = config[
-            'retweet_video_download']  # 取值范围为0、1, 0代表不下载转发微博视频,1代表下载
         self.download_comment = config['download_comment']  #1代表下载评论,0代表不下载
         self.comment_max_download_count = config[
             'comment_max_download_count']  #如果设置了下评论，每条微博评论数会限制在这个值内
@@ -65,7 +55,6 @@ class Weibo(object):
         cookie = config.get('cookie')  # 微博cookie，可填可不填
         user_agent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/86.0.4240.111 Safari/537.36'
         self.headers = {'User_Agent': user_agent, 'Cookie': cookie}
-        self.mysql_config = config.get('mysql_config')  # MySQL数据库连接配置，可以不填
         user_id_list = config['user_id_list']
         query_list = config.get('query_list') or []
         if isinstance(query_list, str):
@@ -98,8 +87,7 @@ class Weibo(object):
 
         # 验证filter、original_pic_download、retweet_pic_download、original_video_download、retweet_video_download
         argument_list = [
-            'filter', 'original_pic_download', 'retweet_pic_download',
-            'original_video_download', 'retweet_video_download',
+            'filter', 
             'download_comment'
         ]
         for argument in argument_list:
@@ -120,17 +108,6 @@ class Weibo(object):
                 query_list, str)):
             logger.warning(u'query_list值应为list类型或字符串,请重新输入')
             sys.exit()
-
-        # 验证write_mode
-        write_mode = ['csv', 'json', 'mongo', 'mysql', 'sqlite']
-        if not isinstance(config['write_mode'], list):
-            sys.exit(u'write_mode值应为list类型')
-        for mode in config['write_mode']:
-            if mode not in write_mode:
-                logger.warning(
-                    u'%s为无效模式，请从csv、json、mongo和mysql中挑选一个或多个作为write_mode',
-                    mode)
-                sys.exit()
 
         # 验证user_id_list
         user_id_list = config['user_id_list']
@@ -202,64 +179,11 @@ class Weibo(object):
         ]]
         self.csv_helper(result_headers, result_data, file_path)
 
-    def user_to_mongodb(self):
-        """将爬取的用户信息写入MongoDB数据库"""
-        user_list = [self.user]
-        self.info_to_mongodb('user', user_list)
-        logger.info(u'%s信息写入MongoDB数据库完毕', self.user['screen_name'])
-
-    def user_to_mysql(self):
-        """将爬取的用户信息写入MySQL数据库"""
-        mysql_config = {
-            'host': 'localhost',
-            'port': 3306,
-            'user': 'root',
-            'password': '123456',
-            'charset': 'utf8mb4'
-        }
-        # 创建'weibo'数据库
-        create_database = """CREATE DATABASE IF NOT EXISTS weibo DEFAULT
-                         CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"""
-        self.mysql_create_database(mysql_config, create_database)
-        # 创建'user'表
-        create_table = """
-                CREATE TABLE IF NOT EXISTS user (
-                id varchar(20) NOT NULL,
-                screen_name varchar(30),
-                gender varchar(10),
-                statuses_count INT,
-                followers_count INT,
-                follow_count INT,
-                registration_time varchar(20),
-                sunshine varchar(20),
-                birthday varchar(40),
-                location varchar(200),
-                education varchar(200),
-                company varchar(200),
-                description varchar(400),
-                profile_url varchar(200),
-                profile_image_url varchar(200),
-                avatar_hd varchar(200),
-                urank INT,
-                mbrank INT,
-                verified BOOLEAN DEFAULT 0,
-                verified_type INT,
-                verified_reason varchar(140),
-                PRIMARY KEY (id)
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"""
-        self.mysql_create_table(mysql_config, create_table)
-        self.mysql_insert(mysql_config, 'user', [self.user])
-        logger.info(u'%s信息写入MySQL数据库完毕', self.user['screen_name'])
 
     def user_to_database(self):
         """将用户信息写入文件/数据库"""
         self.user_to_csv()
-        if 'mysql' in self.write_mode:
-            self.user_to_mysql()
-        if 'mongo' in self.write_mode:
-            self.user_to_mongodb()
-        if 'sqlite' in self.write_mode:
-            self.user_to_sqlite()
+
 
     def get_user_info(self):
         """获取用户信息"""
@@ -383,157 +307,6 @@ class Weibo(object):
         if live_photo_list:
             video_url_list += live_photo_list
         return ';'.join(video_url_list)
-
-    def download_one_file(self, url, file_path, type, weibo_id):
-        """下载单个文件(图片/视频)"""
-        try:
-
-            file_exist = os.path.isfile(file_path)
-            sqlite_exist = ('sqlite' in self.write_mode) and (
-                self.sqlite_exist_file(file_path))
-
-            need_download = (not file_exist) or (not sqlite_exist)
-            if need_download:
-                s = requests.Session()
-                s.mount(url, HTTPAdapter(max_retries=5))
-                flag = True
-                try_count = 0
-                while flag and try_count < 5:
-                    flag = False
-                    downloaded = s.get(url,
-                                       headers=self.headers,
-                                       timeout=(5, 10),
-                                       verify=False)
-                    try_count += 1
-                    if (url.endswith(('jpg', 'jpeg'))
-                            and not downloaded.content.endswith(b'\xff\xd9')
-                        ) or (url.endswith('png') and
-                              not downloaded.content.endswith(b'\xaeB`\x82')):
-                        flag = True
-
-                #需要分别判断是否需要下载
-                if not file_exist:
-                    with open(file_path, 'wb') as f:
-                        f.write(downloaded.content)
-
-                if (not sqlite_exist) and ('sqlite' in self.write_mode):
-                    self.insert_file_sqlite(file_path, weibo_id, url,
-                                            downloaded.content)
-        except Exception as e:
-            error_file = self.get_filepath(
-                type) + os.sep + 'not_downloaded.txt'
-            with open(error_file, 'ab') as f:
-                url = str(weibo_id) + ':' + file_path + ':' + url + '\n'
-                f.write(url.encode(sys.stdout.encoding))
-            logger.exception(e)
-
-    def sqlite_exist_file(self, url):
-        if not os.path.exists(self.get_sqlte_path()):
-            return True
-        con = self.get_sqlite_connection()
-        cur = con.cursor()
-
-        query_sql = """SELECT url FROM bins WHERE path=? """
-        count = cur.execute(query_sql, (url, )).fetchone()
-        con.close()
-        if count is None:
-            return False
-
-        return True
-
-    def insert_file_sqlite(self, file_path, weibo_id, url, binary):
-        if not weibo_id:
-            return
-        extension = Path(file_path).suffix
-        if not extension:
-            return
-        if len(binary) <= 0:
-            return
-
-        file_data = OrderedDict()
-        file_data["weibo_id"] = weibo_id
-        file_data["ext"] = extension
-        file_data["data"] = binary
-        file_data["path"] = file_path
-        file_data["url"] = url
-
-        con = self.get_sqlite_connection()
-        self.sqlite_insert(con, file_data, "bins")
-        con.close()
-
-    def handle_download(self, file_type, file_dir, urls, w):
-        """处理下载相关操作"""
-        file_prefix = w['created_at'][:11].replace('-', '') + '_' + str(
-            w['id'])
-        if file_type == 'img':
-            if ',' in urls:
-                url_list = urls.split(',')
-                for i, url in enumerate(url_list):
-                    index = url.rfind('.')
-                    if len(url) - index >= 5:
-                        file_suffix = '.jpg'
-                    else:
-                        file_suffix = url[index:]
-                    file_name = file_prefix + '_' + str(i + 1) + file_suffix
-                    file_path = file_dir + os.sep + file_name
-                    self.download_one_file(url, file_path, file_type, w['id'])
-            else:
-                index = urls.rfind('.')
-                if len(urls) - index > 5:
-                    file_suffix = '.jpg'
-                else:
-                    file_suffix = urls[index:]
-                file_name = file_prefix + file_suffix
-                file_path = file_dir + os.sep + file_name
-                self.download_one_file(urls, file_path, file_type, w['id'])
-        else:
-            file_suffix = '.mp4'
-            if ';' in urls:
-                url_list = urls.split(';')
-                if url_list[0].endswith('.mov'):
-                    file_suffix = '.mov'
-                for i, url in enumerate(url_list):
-                    file_name = file_prefix + '_' + str(i + 1) + file_suffix
-                    file_path = file_dir + os.sep + file_name
-                    self.download_one_file(url, file_path, file_type, w['id'])
-            else:
-                if urls.endswith('.mov'):
-                    file_suffix = '.mov'
-                file_name = file_prefix + file_suffix
-                file_path = file_dir + os.sep + file_name
-                self.download_one_file(urls, file_path, file_type, w['id'])
-
-    def download_files(self, file_type, weibo_type, wrote_count):
-        """下载文件(图片/视频)"""
-        try:
-            describe = ''
-            if file_type == 'img':
-                describe = u'图片'
-                key = 'pics'
-            else:
-                describe = u'视频'
-                key = 'video_url'
-            if weibo_type == 'original':
-                describe = u'原创微博' + describe
-            else:
-                describe = u'转发微博' + describe
-            logger.info(u'即将进行%s下载', describe)
-            file_dir = self.get_filepath(file_type)
-            file_dir = file_dir + os.sep + describe
-            if not os.path.isdir(file_dir):
-                os.makedirs(file_dir)
-            for w in tqdm(self.weibo[wrote_count:], desc='Download progress'):
-                if weibo_type == 'retweet':
-                    if w.get('retweet'):
-                        w = w['retweet']
-                    else:
-                        continue
-                if w.get(key):
-                    self.handle_download(file_type, file_dir, w.get(key), w)
-            logger.info(u'%s下载完毕,保存路径:', describe)
-            logger.info(file_dir)
-        except Exception as e:
-            logger.exception(e)
 
     def get_location(self, selector):
         """获取微博发布位置"""
@@ -733,6 +506,8 @@ class Weibo(object):
                 retweet['created_at'] = self.standardize_date(
                     retweeted_status['created_at'])
                 weibo['retweet'] = retweet
+
+                self._get_weibo_comments_nocookie(weibo, 0, 1, 1)
             else:  # 原创
                 if is_long:
                     weibo = self.get_long_weibo(weibo_id)
@@ -746,21 +521,7 @@ class Weibo(object):
         except Exception as e:
             logger.exception(e)
 
-    def get_weibo_comments(self, weibo, max_count, on_downloaded):
-        """
-        :weibo standardlized weibo
-        :max_count 最大允许下载数
-        :on_downloaded 下载完成时的实例方法回调
-        """
-        if weibo['comments_count'] == 0:
-            return
-
-        logger.info(u'正在下载评论 微博id:{id}正文:{text}'.format(id=weibo['id'],text=weibo['text']))
-        self._get_weibo_comments_cookie(weibo, 0, max_count, None,
-                                        on_downloaded)
-
-    def _get_weibo_comments_cookie(self, weibo, cur_count, max_count, max_id,
-                                   on_downloaded):
+    def _get_weibo_comments_nocookie(self, weibo, cur_count, max_count, page):
         """
         :weibo standardlized weibo
         :cur_count  已经下载的评论数
@@ -770,73 +531,7 @@ class Weibo(object):
         """
         if cur_count >= max_count:
             return
-
-        id = weibo["id"]
-        params = {"mid": id}
-        if max_id:
-            params["max_id"] = max_id
-
-        url = "https://m.weibo.cn/comments/hotflow?max_id_type=0"
-        req = requests.get(
-            url,
-            params=params,
-            headers=self.headers,
-        )
-        json = None
-        error = False
-        try:
-            json = req.json()
-        except Exception as e:
-            #没有cookie会抓取失败
-            #微博日期小于某个日期的用这个url会被403 需要用老办法尝试一下
-            error = True
-
-        if error:
-            #最大好像只能有50条 TODO: improvement
-            self._get_weibo_comments_nocookie(weibo, 0, max_count, 0,
-                                              on_downloaded)
-            return
-
-        data = json.get('data')
-        if not data:
-            #新接口没有抓取到的老接口也试一下
-            self._get_weibo_comments_nocookie(weibo, 0, max_count, 0,
-                                              on_downloaded)
-            return
-
-        comments = data.get('data')
-        count = len(comments)
-        if count == 0:
-            #没有了可以直接跳出递归
-            return
-
-        if on_downloaded:
-            on_downloaded(weibo, comments)
-
-        #随机睡眠一下
-        if max_count % 40 == 0:
-            sleep(random.randint(1, 5))
-
-        cur_count += count
-        max_id = data.get('max_id')
-
-        if max_id == 0:
-            return
-
-        self._get_weibo_comments_cookie(weibo, cur_count, max_count, max_id,
-                                        on_downloaded)
-
-    def _get_weibo_comments_nocookie(self, weibo, cur_count, max_count, page,
-                                     on_downloaded):
-        """
-        :weibo standardlized weibo
-        :cur_count  已经下载的评论数
-        :max_count 最大允许下载数
-        :max_id 微博返回的max_id参数
-        :on_downloaded 下载完成时的实例方法回调
-        """
-        if cur_count >= max_count:
-            return
+        print("getting comments")
         id = weibo['id']
         url = "https://m.weibo.cn/api/comments/show?id={id}&page={page}".format(
             id=id, page=page)
@@ -854,13 +549,13 @@ class Weibo(object):
         if not data:
             return
         comments = data.get('data')
+        print("comment: " + comments[0]['text'])
+
         count = len(comments)
         if count == 0:
             #没有了可以直接跳出递归
             return
 
-        if on_downloaded:
-            on_downloaded(weibo, comments)
 
         cur_count += count
         page += 1
@@ -876,8 +571,7 @@ class Weibo(object):
 
         if page >= req_page:
             return
-        self._get_weibo_comments_nocookie(weibo, cur_count, max_count, page,
-                                          on_downloaded)
+        self._get_weibo_comments_nocookie(weibo, cur_count, max_count, page)
 
     def is_pinned_weibo(self, info):
         """判断微博是否为置顶微博"""
@@ -1079,227 +773,6 @@ class Weibo(object):
         logger.info(u'%d条微博写入json文件完毕,保存路径:', self.got_count)
         logger.info(path)
 
-    def info_to_mongodb(self, collection, info_list):
-        """将爬取的信息写入MongoDB数据库"""
-        try:
-            import pymongo
-        except ImportError:
-            logger.warning(
-                u'系统中可能没有安装pymongo库，请先运行 pip install pymongo ，再运行程序')
-            sys.exit()
-        try:
-            from pymongo import MongoClient
-
-            client = MongoClient()
-            db = client['weibo']
-            collection = db[collection]
-            if len(self.write_mode) > 1:
-                new_info_list = copy.deepcopy(info_list)
-            else:
-                new_info_list = info_list
-            for info in new_info_list:
-                if not collection.find_one({'id': info['id']}):
-                    collection.insert_one(info)
-                else:
-                    collection.update_one({'id': info['id']}, {'$set': info})
-        except pymongo.errors.ServerSelectionTimeoutError:
-            logger.warning(
-                u'系统中可能没有安装或启动MongoDB数据库，请先根据系统环境安装或启动MongoDB，再运行程序')
-            sys.exit()
-
-    def weibo_to_mongodb(self, wrote_count):
-        """将爬取的微博信息写入MongoDB数据库"""
-        self.info_to_mongodb('weibo', self.weibo[wrote_count:])
-        logger.info(u'%d条微博写入MongoDB数据库完毕', self.got_count)
-
-    def mysql_create(self, connection, sql):
-        """创建MySQL数据库或表"""
-        try:
-            with connection.cursor() as cursor:
-                cursor.execute(sql)
-        finally:
-            connection.close()
-
-    def mysql_create_database(self, mysql_config, sql):
-        """创建MySQL数据库"""
-        try:
-            import pymysql
-        except ImportError:
-            logger.warning(
-                u'系统中可能没有安装pymysql库，请先运行 pip install pymysql ，再运行程序')
-            sys.exit()
-        try:
-            if self.mysql_config:
-                mysql_config = self.mysql_config
-            connection = pymysql.connect(**mysql_config)
-            self.mysql_create(connection, sql)
-        except pymysql.OperationalError:
-            logger.warning(u'系统中可能没有安装或正确配置MySQL数据库，请先根据系统环境安装或配置MySQL，再运行程序')
-            sys.exit()
-
-    def mysql_create_table(self, mysql_config, sql):
-        """创建MySQL表"""
-        import pymysql
-
-        if self.mysql_config:
-            mysql_config = self.mysql_config
-        mysql_config['db'] = 'weibo'
-        connection = pymysql.connect(**mysql_config)
-        self.mysql_create(connection, sql)
-
-    def mysql_insert(self, mysql_config, table, data_list):
-        """向MySQL表插入或更新数据"""
-        import pymysql
-
-        if len(data_list) > 0:
-            keys = ', '.join(data_list[0].keys())
-            values = ', '.join(['%s'] * len(data_list[0]))
-            if self.mysql_config:
-                mysql_config = self.mysql_config
-            mysql_config['db'] = 'weibo'
-            connection = pymysql.connect(**mysql_config)
-            cursor = connection.cursor()
-            sql = """INSERT INTO {table}({keys}) VALUES ({values}) ON
-                     DUPLICATE KEY UPDATE""".format(table=table,
-                                                    keys=keys,
-                                                    values=values)
-            update = ','.join([
-                ' {key} = values({key})'.format(key=key)
-                for key in data_list[0]
-            ])
-            sql += update
-            try:
-                cursor.executemany(
-                    sql, [tuple(data.values()) for data in data_list])
-                connection.commit()
-            except Exception as e:
-                connection.rollback()
-                logger.exception(e)
-            finally:
-                connection.close()
-
-    def weibo_to_mysql(self, wrote_count):
-        """将爬取的微博信息写入MySQL数据库"""
-        mysql_config = {
-            'host': 'localhost',
-            'port': 3306,
-            'user': 'root',
-            'password': '123456',
-            'charset': 'utf8mb4'
-        }
-        # 创建'weibo'表
-        create_table = """
-                CREATE TABLE IF NOT EXISTS weibo (
-                id varchar(20) NOT NULL,
-                bid varchar(12) NOT NULL,
-                user_id varchar(20),
-                screen_name varchar(30),
-                text varchar(2000),
-                article_url varchar(100),
-                topics varchar(200),
-                at_users varchar(1000),
-                pics varchar(3000),
-                video_url varchar(1000),
-                location varchar(100),
-                created_at DATETIME,
-                source varchar(30),
-                attitudes_count INT,
-                comments_count INT,
-                reposts_count INT,
-                retweet_id varchar(20),
-                PRIMARY KEY (id)
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"""
-        self.mysql_create_table(mysql_config, create_table)
-        weibo_list = []
-        retweet_list = []
-        if len(self.write_mode) > 1:
-            info_list = copy.deepcopy(self.weibo[wrote_count:])
-        else:
-            info_list = self.weibo[wrote_count:]
-        for w in info_list:
-            if 'retweet' in w:
-                w['retweet']['retweet_id'] = ''
-                retweet_list.append(w['retweet'])
-                w['retweet_id'] = w['retweet']['id']
-                del w['retweet']
-            else:
-                w['retweet_id'] = ''
-            weibo_list.append(w)
-        # 在'weibo'表中插入或更新微博数据
-        self.mysql_insert(mysql_config, 'weibo', retweet_list)
-        self.mysql_insert(mysql_config, 'weibo', weibo_list)
-        logger.info(u'%d条微博写入MySQL数据库完毕', self.got_count)
-
-    def weibo_to_sqlite(self, wrote_count):
-        con = self.get_sqlite_connection()
-        weibo_list = []
-        retweet_list = []
-        if len(self.write_mode) > 1:
-            info_list = copy.deepcopy(self.weibo[wrote_count:])
-        else:
-            info_list = self.weibo[wrote_count:]
-        for w in info_list:
-            if 'retweet' in w:
-                w['retweet']['retweet_id'] = ''
-                retweet_list.append(w['retweet'])
-                w['retweet_id'] = w['retweet']['id']
-                del w['retweet']
-            else:
-                w['retweet_id'] = ''
-            weibo_list.append(w)
-
-        max_count = self.comment_max_download_count
-        download_comment = (self.download_comment and max_count > 0)
-
-        count = 0
-        for weibo in weibo_list:
-            self.sqlite_insert_weibo(con, weibo)
-            if (download_comment) and (weibo['comments_count'] > 0):
-                self.get_weibo_comments(weibo, max_count,
-                                        self.sqlite_insert_comments)
-                count += 1
-                #为防止被ban抓取一定数量的评论后随机睡3到6秒
-                if count % 20:
-                    sleep(random.randint(3, 6))
-
-        for weibo in retweet_list:
-            self.sqlite_insert_weibo(con, weibo)
-
-        con.close()
-
-    def sqlite_insert_comments(self, weibo, comments):
-        if not comments or len(comments) == 0:
-            return
-        con = self.get_sqlite_connection()
-        for comment in comments:
-            data = self.parse_sqlite_comment(comment, weibo)
-            self.sqlite_insert(con, data, "comments")
-
-        con.close()
-
-    def parse_sqlite_comment(self, comment, weibo):
-        if not comment:
-            return
-        sqlite_comment = OrderedDict()
-        sqlite_comment["id"] = comment['id']
-
-        self._try_get_value('bid', 'bid', sqlite_comment, comment)
-        self._try_get_value('root_id', 'rootid', sqlite_comment, comment)
-        self._try_get_value('created_at', 'created_at', sqlite_comment,
-                            comment)
-        sqlite_comment["weibo_id"] = weibo['id']
-
-        sqlite_comment["user_id"] = comment['user']['id']
-        sqlite_comment["user_screen_name"] = comment['user']['screen_name']
-        self._try_get_value('user_avatar_url', 'avatar_hd', sqlite_comment,
-                            comment['user'])
-        sqlite_comment["text"] = comment['text']
-        sqlite_comment["pic_url"] = ''
-        if comment.get('pic'):
-            sqlite_comment["pic_url"] = comment['pic']['large']['url']
-        self._try_get_value('like_count', 'like_count', sqlite_comment,
-                            comment)
-        return sqlite_comment
 
     def _try_get_value(self, source_name, target_name, dict, json):
         dict[source_name] = ''
@@ -1307,162 +780,8 @@ class Weibo(object):
         if value:
             dict[source_name] = value
 
-    def sqlite_insert_weibo(self, con: sqlite3.Connection, weibo: dict):
-        sqlite_weibo = self.parse_sqlite_weibo(weibo)
-        self.sqlite_insert(con, sqlite_weibo, "weibo")
-
-    def parse_sqlite_weibo(self, weibo):
-        if not weibo:
-            return
-        sqlite_weibo = OrderedDict()
-        sqlite_weibo["user_id"] = weibo["user_id"]
-        sqlite_weibo["id"] = weibo["id"]
-        sqlite_weibo["bid"] = weibo["bid"]
-        sqlite_weibo["screen_name"] = weibo["screen_name"]
-        sqlite_weibo["text"] = weibo["text"]
-        sqlite_weibo["article_url"] = weibo["article_url"]
-        sqlite_weibo["topics"] = weibo["topics"]
-        sqlite_weibo["pics"] = weibo["pics"]
-        sqlite_weibo["video_url"] = weibo["video_url"]
-        sqlite_weibo["location"] = weibo["location"]
-        sqlite_weibo["created_at"] = weibo["created_at"]
-        sqlite_weibo["source"] = weibo["source"]
-        sqlite_weibo["attitudes_count"] = weibo["attitudes_count"]
-        sqlite_weibo["comments_count"] = weibo["comments_count"]
-        sqlite_weibo["reposts_count"] = weibo["reposts_count"]
-        sqlite_weibo["retweet_id"] = weibo["retweet_id"]
-        sqlite_weibo["at_users"] = weibo["at_users"]
-        return sqlite_weibo
-
-    def user_to_sqlite(self):
-        con = self.get_sqlite_connection()
-        self.sqlite_insert_user(con, self.user)
-        con.close()
-
-    def sqlite_insert_user(self, con: sqlite3.Connection, user: dict):
-        sqlite_user = self.parse_sqlite_user(user)
-        self.sqlite_insert(con, sqlite_user, "user")
-
-    def parse_sqlite_user(self, user):
-        if not user:
-            return
-        sqlite_user = OrderedDict()
-        sqlite_user["id"] = user["id"]
-        sqlite_user["nick_name"] = user["screen_name"]
-        sqlite_user["gender"] = user["gender"]
-        sqlite_user["follower_count"] = user["followers_count"]
-        sqlite_user["follow_count"] = user["follow_count"]
-        sqlite_user["birthday"] = user["birthday"]
-        sqlite_user["location"] = user["location"]
-        sqlite_user["edu"] = user["education"]
-        sqlite_user["company"] = user["company"]
-        sqlite_user["reg_date"] = user["registration_time"]
-        sqlite_user["main_page_url"] = user["profile_url"]
-        sqlite_user["avatar_url"] = user["avatar_hd"]
-        sqlite_user["bio"] = user["description"]
-        return sqlite_user
-
-    def sqlite_insert(self, con: sqlite3.Connection, data: dict, table: str):
-        if not data:
-            return
-        cur = con.cursor()
-        keys = ",".join(data.keys())
-        values = ",".join(['?'] * len(data))
-        sql = """INSERT OR REPLACE INTO {table}({keys}) VALUES({values})
-                """.format(table=table, keys=keys, values=values)
-        cur.execute(sql, list(data.values()))
-        con.commit()
-
-    def get_sqlite_connection(self):
-        path = self.get_sqlte_path()
-        create = False
-        if not os.path.exists(path):
-            create = True
-
-        con = sqlite3.connect(path)
-
-        if create == True:
-            self.create_sqlite_table(connection=con)
-
-        return con
-
-    def create_sqlite_table(self, connection: sqlite3.Connection):
-        sql = self.get_sqlite_create_sql()
-        cur = connection.cursor()
-        cur.executescript(sql)
-        connection.commit()
-
-    def get_sqlte_path(self):
-        return "./weibo/weibodata.db"
-
-    def get_sqlite_create_sql(self):
-        create_sql = """
-                CREATE TABLE IF NOT EXISTS user (
-                    id varchar(64) NOT NULL
-                    ,nick_name varchar(64) NOT NULL
-                    ,gender varchar(6)
-                    ,follower_count integer
-                    ,follow_count integer
-                    ,birthday varchar(10)
-                    ,location varchar(32)
-                    ,edu varchar(32)
-                    ,company varchar(32)
-                    ,reg_date DATETIME
-                    ,main_page_url text
-                    ,avatar_url text
-                    ,bio text
-                    ,PRIMARY KEY (id)
-                );
-
-                CREATE TABLE IF NOT EXISTS weibo (
-                    id varchar(20) NOT NULL
-                    ,bid varchar(12) NOT NULL
-                    ,user_id varchar(20)
-                    ,screen_name varchar(30)
-                    ,text varchar(2000)
-                    ,article_url varchar(100)
-                    ,topics varchar(200)
-                    ,at_users varchar(1000)
-                    ,pics varchar(3000)
-                    ,video_url varchar(1000)
-                    ,location varchar(100)
-                    ,created_at DATETIME
-                    ,source varchar(30)
-                    ,attitudes_count INT
-                    ,comments_count INT
-                    ,reposts_count INT
-                    ,retweet_id varchar(20)
-                    ,PRIMARY KEY (id)
-                );
-
-                CREATE TABLE IF NOT EXISTS bins (
-                    id integer PRIMARY KEY AUTOINCREMENT
-                    ,ext varchar(10) NOT NULL /*file extension*/
-                    ,data blob NOT NULL
-                    ,weibo_id varchar(20)
-                    ,comment_id varchar(20)
-                    ,path text
-                    ,url text
-                );
 
 
-                CREATE TABLE IF NOT EXISTS comments (
-                    id varchar(20) NOT NULL
-                    ,bid varchar(20) NOT NULL
-                    ,weibo_id varchar(32) NOT NULL
-                    ,root_id varchar(20) 
-                    ,user_id varchar(20) NOT NULL
-                    ,created_at varchar(20)
-                    ,user_screen_name varchar(64) NOT NULL
-                    ,user_avatar_url text
-                    ,text varchar(1000)
-                    ,pic_url text
-                    ,like_count integer
-                    ,PRIMARY KEY (id)
-                );
-
-                 """
-        return create_sql
 
     def update_user_config_file(self, user_config_file_path):
         """更新用户配置文件"""
@@ -1493,25 +812,15 @@ class Weibo(object):
     def write_data(self, wrote_count):
         """将爬到的信息写入文件或数据库"""
         if self.got_count > wrote_count:
-            if 'csv' in self.write_mode:
-                self.write_csv(wrote_count)
-            if 'json' in self.write_mode:
-                self.write_json(wrote_count)
-            if 'mysql' in self.write_mode:
-                self.weibo_to_mysql(wrote_count)
-            if 'mongo' in self.write_mode:
-                self.weibo_to_mongodb(wrote_count)
-            if 'sqlite' in self.write_mode:
-                self.weibo_to_sqlite(wrote_count)
-            if self.original_pic_download:
-                self.download_files('img', 'original', wrote_count)
-            if self.original_video_download:
-                self.download_files('video', 'original', wrote_count)
-            if not self.filter:
-                if self.retweet_pic_download:
-                    self.download_files('img', 'retweet', wrote_count)
-                if self.retweet_video_download:
-                    self.download_files('video', 'retweet', wrote_count)
+            self.write_csv(wrote_count)
+            # if 'json' in self.write_mode:
+            #     self.write_json(wrote_count)
+
+            # if not self.filter:
+            #     if self.retweet_pic_download:
+            #         self.download_files('img', 'retweet', wrote_count)
+            #     if self.retweet_video_download:
+            #         self.download_files('video', 'retweet', wrote_count)
 
     def get_pages(self):
         """获取全部微博"""
