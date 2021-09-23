@@ -1,7 +1,3 @@
-import codecs
-import collections
-import copy
-import csv
 import json
 import logging
 import logging.config
@@ -10,7 +6,6 @@ import os
 from pathlib import Path
 import random
 import sys
-import warnings
 from collections import OrderedDict
 from datetime import date, datetime, timedelta
 from time import sleep
@@ -20,12 +15,15 @@ from lxml import etree
 from requests.adapters import HTTPAdapter
 from requests.api import request
 from tqdm import tqdm
+import pandas as pd
 
-
+# '2985252453', 
 userIDs = ['1669879400']
 from_date = datetime.strptime('2021-9-1', '%Y-%m-%d')
 to_date = datetime.strptime(str(date.today()), '%Y-%m-%d')
-keyWords=''
+keyWords='' 
+depth = 2 #search depth
+page_skip = 0 #skip every * pages
 
 
 collection = []
@@ -82,7 +80,7 @@ def retrieve_user_info(userID):
 
 
 
-def retrieve_page(page_num, userID):
+def retrieve_page(page_num, userID, comment, d):
     try: 
         if keyWords:
             params = {
@@ -115,7 +113,8 @@ def retrieve_page(page_num, userID):
                         return 2
                     collect = {'weibo_Id' : weiboInfo['id'], 'content' : selector.xpath('string(.)'), 'date' : standardize_date(weiboInfo['created_at']), 'type' : 'post' }
                     collection.append(collect)
-                    get_comments(weiboInfo['id'], 1)
+                    if comment:
+                        get_comments(weiboInfo['id'], 1, d)
             else:
                 print('skipping some weibo')
 
@@ -125,19 +124,19 @@ def retrieve_page(page_num, userID):
         return None
 
 
-def get_comments(weibo_Id, num_of_comments):
+def get_comments(weibo_Id, num_of_comments, d):
 
     comments_url = "https://m.weibo.cn/api/comments/show?id={id}&page={page}".format(id=weibo_Id, page=1)
     comments_req = requests.get(comments_url)
     try: 
         comments_json = comments_req.json()
     except Exception as e:
-        print('fail to grab comment')
+        print('fail to grab comments')
         return None
 
     comments_data = comments_json.get('data')
     if not comments_data:
-        print('no comments')
+        print('no comments available')
         return None
     comments = comments_data.get('data')
     
@@ -148,46 +147,57 @@ def get_comments(weibo_Id, num_of_comments):
         selector = etree.HTML(text)
         collect = {'weibo_Id' : comment['id'], 'content' : selector.xpath('string(.)'), 'date' : standardize_date(comment['created_at']), 'type' : 'comment' }
         collection.append(collect)
-
+       
+        scrape(str(comment['user']['id']), d)
         if num_of_comments <= 0:
             return None
 
-    
+#d = depth  
+def scrape(userID, d):
+    if d <= 0:
+        return None
+    d-=1
+    userProfile = retrieve_user_info(userID)
 
-def scrape():
+    weibo_count = userProfile['weibo_count']
+    page_count = int(math.ceil(weibo_count / 10.0))
+
+    randomSleep = 0
+    random_pages = random.randint(1, 5)
+    
+    for page_num in tqdm(range(1, page_count+1, page_skip+1)):
+        status = retrieve_page(page_num, userID, True, d) # 1 end of the time period,  2 haven't reached the set time period
+        if status == 1:
+            break
+        if status == 2:
+            page_num += 5
+            continue
+
+        if page_num % 30 == 0:
+            pd.DataFrame(collection).to_csv('weibos.csv')
+        
+        #mimic human 
+        if (page_num - randomSleep) % random_pages == 0:
+                sleep(random.randint(6, 10))
+                randomSleep = page_num
+                random_pages = random.randint(1, 5)                            
+    pd.DataFrame(collection).to_csv('weibos.csv')
+
+
+def main():
     try:
         if to_date >= from_date:
             print('valid time period')
             for userID in userIDs:
-                userProfile = retrieve_user_info(userID)
-
-                weibo_count = userProfile['weibo_count']
-                page_count = int(math.ceil(weibo_count / 10.0))
-
-                randomSleep = 0
-                random_pages = random.randint(1, 5)
-                
-                for page_num in tqdm(range(1, page_count+1)):
-                    status = retrieve_page(page_num, userID) # 1 end of the time period,  2 haven't reached the set time period
-                    if status == 1:
-                        break
-                    if status == 2:
-                        page_num += 5
-                        continue
-
-                    
-                    #mimic human 
-                    if (page_num - randomSleep) % random_pages == 0:
-                            sleep(random.randint(6, 10))
-                            randomSleep = page_num
-                            random_pages = random.randint(1, 5)
+                scrape(userID, depth)
+            
         else:
             print('invalid time period')
 
     except Exception as e:
         print(e)
         
-scrape()
+main()
 
-import pandas as pd
+
 pd.DataFrame(collection).to_csv('weibos.csv')
