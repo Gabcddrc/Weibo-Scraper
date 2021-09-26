@@ -17,19 +17,20 @@ from requests.api import request
 from tqdm import tqdm
 import pandas as pd
 
+#Input Parameters
 # '2985252453', 
-userIDs = ['1669879400']
+userIDs = ['1669879400'] #weibo user IDs
 from_date = datetime.strptime('2021-9-1', '%Y-%m-%d')
 to_date = datetime.strptime(str(date.today()), '%Y-%m-%d')
-keyWords='' 
+keyWords='' #todo
 depth = 2 #search depth
 page_skip = 0 #skip every * pages
 
 
 collection = []
 
+#standardize weibo time to yyyy-mm-dd
 def standardize_date(created_at):
-    """标准化微博发布时间"""
     if u'刚刚' in created_at:
         created_at = datetime.now().strftime('%Y-%m-%d')
     elif u'分钟' in created_at:
